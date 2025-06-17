@@ -2,7 +2,6 @@ package com.example.signrecognition3.ui
 
 
 import android.util.Log
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
