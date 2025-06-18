@@ -1,11 +1,12 @@
 package com.example.signrecognition3.ui
 
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
@@ -26,6 +27,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.text.SimpleDateFormat
 import java.util.*
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VideoCaptureScreen(
@@ -34,22 +36,24 @@ fun VideoCaptureScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
 
-    val result by vm.result.collectAsState()
+    val result by vm.result.collectAsState(initial = "Esperando...")
     val isRecording by vm.isRecordingState
     val screenHeight = LocalConfiguration.current.screenHeightDp.dp
 
+    // Modal Bottom Sheet State
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showSheet by remember { mutableStateOf(false) }
-    val gestures by vm.gestures.collectAsState()
+    val gestures by vm.gestures.collectAsState(initial = emptyList())
 
     LaunchedEffect(showSheet) {
         if (showSheet) sheetState.show() else sheetState.hide()
     }
 
+    // Modal Bottom Sheet que muestra los gestos detectados
     if (showSheet) {
         ModalBottomSheet(
             onDismissRequest = { showSheet = false },
-            sheetState = sheetState // Removed contentWindowInsets here
+            sheetState = sheetState
         ) {
             Box(
                 Modifier
@@ -72,6 +76,7 @@ fun VideoCaptureScreen(
                             )
                         }
                         items(gestures) { gesture ->
+                            // Asegúrate de que `gesture` es un objeto de tipo GestureEntity
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = CardDefaults.cardColors(containerColor = Color(0xFFF2F2F7)),
@@ -79,6 +84,7 @@ fun VideoCaptureScreen(
                                 elevation = CardDefaults.cardElevation(2.dp)
                             ) {
                                 Column(Modifier.padding(16.dp)) {
+                                    // Asegúrate de que `gesture.gesture` y `gesture.timestamp` existen en GestureEntity
                                     Text("Gesto: ${gesture.gesture}", style = MaterialTheme.typography.titleMedium)
                                     Text(
                                         "Fecha: ${
@@ -97,9 +103,11 @@ fun VideoCaptureScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Aquí usas AndroidView para mostrar el TextureView
+        // Muestra la vista de la cámara
         AndroidView(
-            factory = { vm.startCamera(context, lifecycleOwner) },  // Asegúrate de retornar el TextureView desde startCamera
+            factory = {
+                vm.startCamera(context, lifecycleOwner) // Asegúrate de que esta función devuelva un PreviewView válido
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .height(screenHeight * 0.85f)
@@ -107,7 +115,6 @@ fun VideoCaptureScreen(
                 .clip(RoundedCornerShape(10.dp))
         )
 
-        // Los botones de control de grabación y cámara
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -122,6 +129,7 @@ fun VideoCaptureScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
+                // Botón para abrir historial
                 OutlinedButton(
                     onClick = { showSheet = true },
                     shape = RoundedCornerShape(10.dp),
@@ -131,15 +139,17 @@ fun VideoCaptureScreen(
                         contentColor = Color.Black
                     )
                 ) {
-                    Icon(Icons.Filled.List, contentDescription = "Historial")  // Fixed icon reference
+                    Icon(Icons.Filled.List, contentDescription = "Historial")
                     Spacer(Modifier.width(6.dp))
                     Text("Historial")
                 }
 
+                // Botón para cambiar la cámara
                 IconButton(onClick = { vm.switchCamera(lifecycleOwner) }) {
                     Icon(Icons.Filled.Cameraswitch, contentDescription = "Cambiar cámara")
                 }
 
+                // Botón para iniciar o detener grabación
                 Button(
                     onClick = { vm.toggleRecording() },
                     shape = RoundedCornerShape(10.dp),
@@ -158,9 +168,11 @@ fun VideoCaptureScreen(
                 }
             }
 
+            // Muestra el resultado de la predicción
             Text(result, style = MaterialTheme.typography.titleMedium, color = Color.DarkGray)
         }
 
+        // Indicador de progreso cuando está procesando
         if (result == "Procesando...") {
             Box(
                 Modifier

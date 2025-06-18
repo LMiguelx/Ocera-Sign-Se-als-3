@@ -1,8 +1,12 @@
 package com.example.signrecognition3.ui
 
+
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import android.util.Size
+import android.view.Surface
+import android.view.TextureView
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -15,58 +19,55 @@ import androidx.lifecycle.viewModelScope
 import com.example.signrecognition3.data.GestureDatabase
 import com.example.signrecognition3.data.GestureEntity
 import com.example.signrecognition3.utils.FrameProcessor
+import com.example.signrecognition3.utils.predictGesture
+import com.example.signrecognition3.utils.preprocessLandmarks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
+import org.tensorflow.lite.Interpreter
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 class VideoCaptureViewModel(application: Application) : AndroidViewModel(application) {
 
-    // ✅ Procesador de frames (MediaPipe o similar)
     private val frameProcessor = FrameProcessor(application)
-
-    // ✅ Lista de etiquetas posibles (random)
-    private val gestureLabels = listOf("Taquicardia", "Taquipnea")
-
-    // ✅ Guarda landmarks capturados
-    private val landmarksCaptured = mutableListOf<List<Float>>()
+    private val landmarksCaptured = mutableListOf<Float>()   // Usamos landmarks en lugar de imágenes
     private var capturing = false
+    private var interpreter: Interpreter? = null
 
-    // ✅ CameraX componentes
     private var cameraProvider: ProcessCameraProvider? = null
     private var analysis: ImageAnalysis? = null
-    private var preview: Preview? = null
-    private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private var preview: Preview? = null  // Añadimos esta declaración
+    private var cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+
+    // Control de cámara activa
     private var _cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
-    // ✅ Estado Compose
+    // Estado UI
     private val isRecording = mutableStateOf(false)
     val isRecordingState: State<Boolean> = isRecording
 
     private val _result = MutableStateFlow("Esperando...")
     val result: StateFlow<String> = _result
 
-    // ✅ Base de datos local
     private val dao = GestureDatabase.getInstance(application).gestureDao()
     val gestures: StateFlow<List<GestureEntity>> =
         dao.getAllGesturesFlow().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // ✅ Parámetros de captura
-    private val NUM_FRAMES = 30
-    private val POINTS_PER_FRAME = 134
+    fun setInterpreter(interpreter: Interpreter) {
+        this.interpreter = interpreter
+    }
 
     fun toggleRecording() {
         if (isRecording.value) {
-            stopCaptureAndPredict()
+            stopCaptureAndPredict(getApplication())
         } else {
             startFrameCapture()
         }
         isRecording.value = !isRecording.value
     }
 
-    fun startCamera(context: Context, lifecycleOwner: LifecycleOwner): PreviewView {
+    fun startCamera(context: Context, lifecycleOwner: LifecycleOwner): PreviewView  {
         val previewView = PreviewView(context)
         val providerFuture = ProcessCameraProvider.getInstance(context)
 
@@ -81,7 +82,7 @@ class VideoCaptureViewModel(application: Application) : AndroidViewModel(applica
 
         }, ContextCompat.getMainExecutor(context))
 
-        return previewView
+        return previewView // Retornamos el TextureView
     }
 
     private fun setupAnalysis() {
@@ -91,26 +92,25 @@ class VideoCaptureViewModel(application: Application) : AndroidViewModel(applica
             .build()
 
         analysis?.setAnalyzer(cameraExecutor) { imageProxy ->
-            try {
-                if (capturing && landmarksCaptured.size < NUM_FRAMES) {
-                    val landmarkResult = frameProcessor.extractLandmarks(imageProxy)
-                    val landmarks = landmarkResult.landmarks  // ✅ extraer la lista interna
-                    if (landmarks.size == POINTS_PER_FRAME) {
-                        synchronized(landmarksCaptured) {
-                            landmarksCaptured.add(landmarks)
-                        }
+            if (capturing && landmarksCaptured.size < 100) {
+                try {
+                    val landmarks = frameProcessor.extractLandmarks(imageProxy)  // Usamos landmarks
+                    synchronized(landmarksCaptured) {
+                        landmarksCaptured.addAll(landmarks)  // Agregar los elementos de la lista, no la lista completa
                     }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    imageProxy.close()
                 }
-                if (landmarksCaptured.size >= NUM_FRAMES && capturing) {
-                    toggleRecording()
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            } finally {
+            } else {
                 imageProxy.close()
             }
-        }
 
+            if (landmarksCaptured.size >= 300 && capturing) { // Usamos 300 ya que estamos agregando 3 valores por landmark
+                toggleRecording()
+            }
+        }
     }
 
     private fun bindCameraUseCases(lifecycleOwner: LifecycleOwner) {
@@ -134,36 +134,57 @@ class VideoCaptureViewModel(application: Application) : AndroidViewModel(applica
 
     private fun startFrameCapture() {
         capturing = true
-        synchronized(landmarksCaptured) { landmarksCaptured.clear() }
+        landmarksCaptured.clear()
         _result.value = "Grabando..."
     }
 
-    private fun stopCaptureAndPredict() {
+    private fun stopCaptureAndPredict(context: Context) {
         capturing = false
-        val frames = synchronized(landmarksCaptured) { landmarksCaptured.toList() }
+        val landmarks = synchronized(landmarksCaptured) { landmarksCaptured.toList() }
 
         _result.value = "Procesando..."
 
         viewModelScope.launch(Dispatchers.IO) {
-            delay(4000)
+            // Log para verificar el tamaño de los landmarks
+            Log.d("VideoCaptureViewModel", "Cantidad de Landmarks: ${landmarks.size}")
 
-            // ⚠️ Nueva validación: si se cortó muy rápido o no hay suficientes frames
-            if (frames.isEmpty() || frames.size < NUM_FRAMES) {
-                _result.value = "Grabación muy corta. Vuelva a intentar grabar..."
-                delay(1000)
-                startFrameCapture()
+            // Verifica que los landmarks sean válidos y tienen el tamaño esperado
+            if (landmarks.isEmpty() || landmarks.size < 134) {
+                _result.value = "Sin datos suficientes"
+                Log.d("VideoCaptureViewModel", "Datos insuficientes de landmarks")
                 return@launch
             }
 
-            // ✅ Si pasó validación
-            val prediction = gestureLabels.random()
-            _result.value = "Gesto detectado: $prediction"
-            dao.insertGesture(GestureEntity(gesture = prediction))
+            // Preprocesar los landmarks y hacer la predicción
+            val input = preprocessLandmarks(landmarks)
 
-            synchronized(landmarksCaptured) { landmarksCaptured.clear() }
+            // Log para verificar la entrada al modelo
+            Log.d("VideoCaptureViewModel", "Entrada al modelo: ${input.contentDeepToString()}")
+
+            val output = Array(1) { FloatArray(6) }  // Para 6 clases
+            interpreter?.run(input, output)
+
+            // Log para verificar la salida del modelo
+            Log.d("VideoCaptureViewModel", "Salida del modelo: ${output.contentDeepToString()}")
+
+            // Obtener la clase con mayor probabilidad
+            val probabilities = output[0]
+            val gestureIndex = probabilities.indices.maxByOrNull { probabilities[it] } ?: -1
+
+            val gestureLabels = listOf(
+                "ausencia", "oliguria", "sangrado_vaginal", "taquicardia", "taquipnea", "tinitus"
+            )
+
+            // Log para ver la predicción final
+            val predictedGesture = if (gestureIndex != -1) gestureLabels[gestureIndex] else "Ningún gesto reconocido"
+            Log.d("VideoCaptureViewModel", "Predicción final: $predictedGesture")
+
+            // Guardar en la base de datos
+            dao.insertGesture(GestureEntity(gesture = predictedGesture))
+
+            _result.value = "Gesto detectado: $predictedGesture"
+            landmarksCaptured.clear()
             System.gc()
-            isRecording.value = false
         }
     }
-
 }
