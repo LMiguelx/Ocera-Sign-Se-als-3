@@ -12,14 +12,16 @@ android {
 
     defaultConfig {
         applicationId = "com.example.signrecognition3"
-        minSdk = 33
+        minSdk = 31
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("arm64-v8a") // o "armeabi-v7a" según el dispositivo
+        }
     }
-
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -62,15 +64,14 @@ dependencies {
     implementation(libs.androidx.material3.android)
     implementation(libs.androidx.ui.tooling.preview.android)
 
+    //mediapipe
 
     implementation("com.google.mediapipe:tasks-vision:0.10.0")
 
     // TensorFlow Lite
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
-    implementation("org.tensorflow:tensorflow-lite-support:0.4.3")
     implementation("org.tensorflow:tensorflow-lite-select-tf-ops:2.14.0")
     implementation("androidx.compose.material:material-icons-extended:1.6.1")
-    implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.2")
 
     // BD
     implementation("androidx.room:room-runtime:2.5.0")
@@ -78,7 +79,11 @@ dependencies {
     ksp("androidx.room:room-compiler:2.5.0")
     implementation("androidx.room:room-ktx:2.5.0")
 
+    //JUnit
+
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+
+    implementation ("androidx.compose.runtime:runtime-livedata:1.6.0")
 }
