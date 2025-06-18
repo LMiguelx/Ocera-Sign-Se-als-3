@@ -19,3 +19,9 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+
+# Add these rules to keep the necessary classes for MediaPipe and TensorFlow
+
+-keep class com.google.mediapipe.** { *; }
+-keep class org.tensorflow.** { *; }
